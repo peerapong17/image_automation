@@ -5,7 +5,7 @@ import google.generativeai as genai
 from PIL import Image
 
 # ตั้งค่า API Key
-genai.configure(api_key="AIzaSyAg_S0xTN67D_091F5VldfvqUFIQM3hZVM")
+genai.configure(api_key="AIzaSyDbMaW0pEx2Cr9HswWv984rp-C_SDXA-Ic")
 
 # ตั้งค่าโฟลเดอร์ที่มีรูปภาพ
 image_folder = "C:/Users/moopi/Downloads/Image Generator/image_test"  # เปลี่ยนเป็น path ของคุณ

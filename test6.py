@@ -7,14 +7,19 @@ import google.generativeai as genai
 from PIL import Image
 
 # ตั้งค่า API Key สำหรับ Gemini
-genai.configure(api_key="AIzaSyDbMaW0pEx2Cr9HswWv984rp-C_SDXA-Ic")
+# genai.configure(api_key="AIzaSyCcUKq4ygHQwHi_h7CJBctK_VaJQWrdzCI")
+
+# free api key
+# genai.configure(api_key="AIzaSyDbMaW0pEx2Cr9HswWv984rp-C_SDXA-Ic")
+genai.configure(api_key="AIzaSyAg_S0xTN67D_091F5VldfvqUFIQM3hZVM")
 
 # ตั้งค่าโฟลเดอร์ที่มีรูปภาพ
 image_folder = "C:/Users/moopi/Downloads/Image Generator/image_test"
 output_csv_path = "output_metadata.csv"
 
 # โหลดโมเดล Gemini
-model = genai.GenerativeModel("gemini-2.0-flash-exp")
+model = genai.GenerativeModel("gemini-1.5-pro")
+# model = genai.GenerativeModel("gemini-2.0-flash-exp")
 
 # ค้นหาไฟล์รูปภาพทั้งหมด
 image_files = [f for f in os.listdir(image_folder) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
@@ -31,13 +36,45 @@ for image_name in image_files:
         image = Image.open(image_path)
 
         # ขอข้อมูลจาก Gemini
+        # response = model.generate_content([
+        #     "Describe the image with a noun phrase, between 70 and 180 characters."
+        #     "Provide 35-50 related keywords, separated by commas.",
+        #     image
+        # ])
+
+        # response = model.generate_content([
+        #     "Give a description for this image, using noun phrase, description should be more than 80 characters"
+        #     "Provide 35-50 related keywords, separated by commas.",
+        #     image
+        # ])
+
+        # response = model.generate_content([
+        #     "Describe the image, separated by comma, description should be more than 70 characters, but no more than 150 characters."
+        #     "Provide 35-50 related keywords, separated by commas.",
+        #     image
+        # ])
+
         response = model.generate_content([
-            "Give a description for this image, using noun phrase, the description more than 70 characters, but no more than 200 characters."
-            "Give me related keywords for this image, more than 35 keywords, separate by comma.",
+            "Describe the image, separated by comma, description should be more than 70 characters, but no more than 150 characters. Exclude trademarked word. "
+            "Provide 35-50 related keywords, separated by commas. Exclude trademarked keywords. Prioritize essential or relevant keywords at the beginning.",
             image
         ])
 
+        # response = model.generate_content([
+        #     "Clearly describe the image using noun phrases, with a description exceeding 80 characters."
+        #     "Provide 35-50 related keywords, separated by commas.",
+        #     image
+        # ])
+
+        # response = model.generate_content([
+        #     "Describe the image, using noun phrase, with a description exceeding 80 characters."
+        #     "Provide 35-50 related keywords, separated by commas.",
+        #     image
+        # ])
+
         text_response = response.text.strip()
+
+        print(text_response)
 
         # ใช้ regex แยก description และ keywords
         match = re.search(r"(.*?)(?:Keywords:|\n\n)(.*)", text_response, re.DOTALL)
@@ -45,19 +82,42 @@ for image_name in image_files:
         if match:
             description = match.group(1).strip()
             keywords_part = match.group(2).strip()
-            
+
+            # ✅ ลบ "**Description:**" และ "**" ที่อาจติดมาใน description
+            description = re.sub(r"^\*\*Description:\*\*\s*|\*\*", "", description).strip()
+
+            # ✅ ถ้า description ไม่มี "." ให้เพิ่มเข้าไป
+            if not description.endswith("."):
+                description += "."
+
             if keywords_part:
                 keywords_list = [
-                    kw.strip().lstrip("*:").replace("**", "").replace("Keywords:", "").strip()  
+                    kw.strip().lstrip("*:").replace("**", "").replace("Keywords:", "").strip().lower()  
                     for kw in re.split(r",\s*|\n", keywords_part) if kw.strip()
                 ]
-                keywords_list = [kw for kw in keywords_list if len(kw.split()) <= 2]
+                
+                # ลบคีย์เวิร์ดที่มีมากกว่า 2 คำ
+                keywords_list = [kw.lower() for kw in keywords_list if len(kw.split()) <= 2]
+
+                # ลบจุด "." ท้ายคีย์เวิร์ดสุดท้ายถ้ามี
+                if keywords_list and keywords_list[-1].endswith('.'):
+                    keywords_list[-1] = keywords_list[-1][:-1]
             else:
                 keywords_list = []
         else:
             description = text_response
+
+            # ✅ ลบ "**Description:**" และ "**" ที่อาจติดมาใน description
+            description = re.sub(r"^\*\*Description:\*\*\s*|\*\*", "", description).strip()
+
+            # ✅ ถ้า description ไม่มี "." ให้เพิ่มเข้าไป
+            if not description.endswith("."):
+                description += "."
+
             keywords_list = list(set(description.lower().split()))[:40]
 
+        # ✅ ลบ "**" ที่อาจติดมาใน title
+        description = re.sub(r"^\*\*", "", description).strip()
         # สร้าง Title จากคำอธิบาย
         title = description
 
