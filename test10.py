@@ -6,48 +6,52 @@ from PIL import Image
 import google.generativeai as genai
 
 def clean_text(text):
-    """
-    Ensures text ends with exactly one period.
-    """
+    """Ensures text ends with exactly one period."""
     text = text.strip()
-    # Remove trailing punctuation
     while text and text[-1] in '.,':
         text = text[:-1].strip()
     return text + "."
 
-def clean_keywords_string(keywords_string):
-    if keywords_string.endswith('.'):
-        return keywords_string[:-1]
-    return keywords_string
+def remove_uncertainty_words(text, capitalize_all=False):
+    """Remove uncertainty words while preserving spaces."""
+    uncertainty_words = [
+        'maybe', 'perhaps', 'likely', 'potentially', 'probably', 
+        'presumably', 'conceivably', 'perchance', 'feasibly', 
+        'seemingly', 'ostensibly', 'supposedly', 'reportedly',
+        'apparently', 'arguably', 'hypothetically', 'allegedly',
+        'theoretically', 'speculatively', 'purportedly', 'possibly'
+    ]
+    
+    text_lower = text.lower()
+    for word in uncertainty_words:
+        text_lower = text_lower.replace(word, '')
+    
+    text = re.sub(r'\s+', ' ', text_lower)
+    text = text.strip()
+    
+    return text.capitalize() if capitalize_all else text.lower()
 
 def process_gemini_response(text_response):
-    """
-    Process Gemini API response to separate description and keywords.
-    If the response doesn't contain explicit 'Keywords:' separator,
-    it will try to separate based on sentence structure.
-    """
+    """Process Gemini API response to separate description and keywords."""
     print("Original response:", text_response)
     
-    # First try to find explicit Keywords section
     match = re.search(r"(.*?)(?:Keywords:|\n\n)(.*)", text_response, re.DOTALL)
     if match:
         description = clean_text(match.group(1).strip())
-        description = description.capitalize()
+        description = remove_uncertainty_words(description, capitalize_all=True)
         
         keywords = match.group(2).strip()
         keywords_list = [
-            kw.strip().lower() 
+            remove_uncertainty_words(kw.strip())
             for kw in re.split(r",\s*|\n", keywords) 
             if kw.strip() and len(kw.split()) <= 2
         ][:50]
         
         return description, keywords_list
     
-    # If no explicit Keywords section, try to separate based on sentence structure
     text = text_response.strip()
     parts = text.split(',')
     
-    # Find the end of the first complete sentence
     description_parts = []
     keyword_parts = []
     found_sentence = False
@@ -56,29 +60,24 @@ def process_gemini_response(text_response):
         part = part.strip()
         if not found_sentence:
             description_parts.append(part)
-            # Check if this part contains end of sentence
             if re.search(r'[.!?]', part):
                 found_sentence = True
                 continue
         else:
-            if part:  # Only add non-empty parts as keywords
+            if part:
                 keyword_parts.append(part)
     
-    # Clean up description
     description = ' '.join(description_parts)
     description = clean_text(description)
-    description = description.capitalize()
+    description = remove_uncertainty_words(description, capitalize_all=True)
     
-    # Clean up keywords
     keywords_list = []
     for kw in keyword_parts:
-        # Remove any punctuation and extra whitespace
-        kw = re.sub(r'[.!?,]', '', kw).strip().lower()
-        # Only keep keywords with 1-2 words
+        kw = re.sub(r'[.!?,]', '', kw).strip()
+        kw = remove_uncertainty_words(kw)
         if kw and len(kw.split()) <= 2:
             keywords_list.append(kw)
     
-    # Remove duplicates while preserving order
     keywords_list = list(dict.fromkeys(keywords_list))[:50]
     
     print("Processed description:", description)
@@ -88,18 +87,16 @@ def process_gemini_response(text_response):
 
 def main():
     # ตั้งค่า API Key สำหรับ Gemini
-    # genai.configure(api_key="AIzaSyCcUKq4ygHQwHi_h7CJBctK_VaJQWrdzCI")
+    genai.configure(api_key="AIzaSyCcUKq4ygHQwHi_h7CJBctK_VaJQWrdzCI")
     
     # free api key options
     # genai.configure(api_key="AIzaSyDbMaW0pEx2Cr9HswWv984rp-C_SDXA-Ic")
     # genai.configure(api_key="AIzaSyAg_S0xTN67D_091F5VldfvqUFIQM3hZVM")
     
-    # Configuration
     image_folder = "C:/Users/moopi/Downloads/Image Generator/image_test"
     output_csv_path = "output_metadata.csv"
     model = genai.GenerativeModel("gemini-1.5-pro")
     
-    # Find image files
     image_files = [f for f in os.listdir(image_folder) 
                    if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
     results = []
@@ -111,7 +108,6 @@ def main():
         "relevant keywords at the beginning. Avoid similar or redundant keywords."
     )
     
-    # Process each image
     for image_name in image_files:
         try:
             image_path = os.path.join(image_folder, image_name)
@@ -133,16 +129,10 @@ def main():
             
         except Exception as e:
             print(f"❌ Error processing {image_name}: {e}")
-
-    for result in results:
-        result['Keywords'] = clean_keywords_string(result['Keywords'])
     
-    # Write CSV header
     with open(output_csv_path, 'w', newline='', encoding='utf-8') as f:
         f.write('Filename,Title,Description,Keywords,Category,Release(s)\n')
-        
     
-    # Write data with proper quoting
     df = pd.DataFrame(results)
     with open(output_csv_path, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
