@@ -7,13 +7,25 @@ from PIL import Image
 import google.generativeai as genai
 
 def clean_text(text):
-    """Ensures text ends with exactly one period."""
+    """Ensures text ends with exactly one period and removes trailing misplaced words."""
     text = text.strip()
+
+    # ลบคำที่อยู่ท้าย sentence โดยไม่ใช้ลิสต์ตายตัว
+    text = re.sub(r'\s+\b\w+\b[.,]?$', '', text, flags=re.IGNORECASE).strip()
+
     while text and text[-1] in '.,':
         text = text[:-1].strip()
+
     return text + "."
 
-def remove_uncertainty_words(text, capitalize_all=False):
+def clean_keywords(keywords):
+    """Removes trailing period from the last keyword in the list."""
+    keywords = keywords.strip()
+    if keywords.endswith('.'):
+        keywords = keywords[:-1].strip()
+    return keywords
+
+def remove_uncertainty_words(text):
     """Remove uncertainty words while preserving spaces."""
     uncertainty_words = [
         'maybe', 'perhaps', 'likely', 'potentially', 'probably', 
@@ -23,13 +35,12 @@ def remove_uncertainty_words(text, capitalize_all=False):
         'theoretically', 'speculatively', 'purportedly', 'possibly'
     ]
     
-    text_lower = text.lower()
     for word in uncertainty_words:
-        text_lower = text_lower.replace(word, '')
+        text = re.sub(r'\b' + word + r'\b', '', text, flags=re.IGNORECASE)
 
-    text = re.sub(r'\s+', ' ', text_lower).strip()
+    text = re.sub(r'\s+', ' ', text).strip()
     
-    return text.capitalize() if capitalize_all else text.lower()
+    return text
 
 def remove_emojis(text):
     """Remove emojis from text."""
@@ -41,20 +52,20 @@ def process_gemini_response(text_response):
     
     match = re.search(r"(.*?)(?:Keywords:|\n\n)(.*)", text_response, re.DOTALL)
     if match:
-        description = clean_text(match.group(1).strip())
-        description = remove_uncertainty_words(description, capitalize_all=True)
+        description = match.group(1).strip()
+        description = clean_text(remove_uncertainty_words(description))
         
         keywords = match.group(2).strip()
         keywords_list = [
             remove_uncertainty_words(remove_emojis(kw.strip()))
-            for kw in re.split(r",\s*|\n", keywords) 
-            if kw.strip() and len(kw.split()) <= 2
+            for kw in re.split(r",\s*", keywords)
+            if kw.strip() and len(kw.split()) <= 2 and not kw.endswith('.')
         ][:50]
         
         return description, keywords_list
     
-    text = text_response.strip()
-    parts = text.split(',')
+    # กรณีไม่เจอ Keywords: pattern
+    parts = text_response.strip().split(',')
     
     description_parts = []
     keyword_parts = []
@@ -71,9 +82,8 @@ def process_gemini_response(text_response):
             if part:
                 keyword_parts.append(part)
     
-    description = ' '.join(description_parts)
-    description = clean_text(description)
-    description = remove_uncertainty_words(description, capitalize_all=True)
+    description = ', '.join(description_parts)
+    description = clean_text(remove_uncertainty_words(description))
     
     keywords_list = []
     for kw in keyword_parts:
@@ -83,15 +93,15 @@ def process_gemini_response(text_response):
             keywords_list.append(kw)
     
     keywords_list = list(dict.fromkeys(keywords_list))[:50]
-    
+
     print("Processed description:", description)
     print("Processed keywords:", keywords_list)
     
     return description, keywords_list
 
 def main():
-    # ตั้งค่า API Key สำหรับ Gemini
-    genai.configure(api_key="YOUR_API_KEY_HERE")
+
+    genai.configure(api_key="AIzaSyCadLG25yqR3q1Vk-l4MWcMx5pVsQmWDPU")
     
     image_folder = "C:/Users/moopi/Downloads/Image Generator/image_test"
     output_csv_path = "output_metadata.csv"
@@ -102,25 +112,25 @@ def main():
     results = []
     
     prompt = (
-        "Describe the image, separated by comma, description should be more than 70 "
-        "characters, but no more than 100 characters. Provide 35-50 related keywords, "
-        "separated by commas. Exclude trademarked keywords. Prioritize essential or "
-        "relevant keywords at the beginning. Avoid similar or redundant keywords."
-    )
-    
+        "Describe the image, separated by comma, description should be more than 70 characters, but no more than 100 characters." 
+        "Provide 35-50 related keywords, separated by commas. Prioritize relevant keywords at the beginning. Avoid trademark keyword."
+        "Avoiding any copyrighted terms except for animal names."
+    )  
+
     for image_name in image_files:
         try:
             image_path = os.path.join(image_folder, image_name)
             image = Image.open(image_path)
             
             response = model.generate_content([prompt, image])
+            print(response.usage_metadata)
             description, keywords_list = process_gemini_response(response.text.strip())
             
             results.append({
                 "Filename": image_name,
                 "Title": description,
                 "Description": description,
-                "Keywords": ", ".join(keywords_list),
+                "Keywords": clean_keywords(", ".join(keywords_list)).lower(),
                 "Category": "",
                 "Release(s)": ""
             })
@@ -130,9 +140,15 @@ def main():
         except Exception as e:
             print(f"❌ Error processing {image_name}: {e}")
     
-    df = pd.DataFrame(results)
-    df.to_csv(output_csv_path, index=False, encoding='utf-8-sig', quoting=csv.QUOTE_ALL)
+    with open(output_csv_path, 'w', newline='', encoding='utf-8') as f:
+        f.write('Filename,Title,Description,Keywords,Category,Release(s)\n')
     
+    df = pd.DataFrame(results)
+    with open(output_csv_path, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f, quotechar='"', quoting=csv.QUOTE_ALL)
+        for _, row in df.iterrows():
+            writer.writerow(row)
+            
     print(f"\n✅ Finished processing all images. CSV saved as: {output_csv_path}")
 
 if __name__ == "__main__":
